@@ -227,6 +227,9 @@ ggml_tensor * conv1d_pertap_gemm_channel_fast(
         ggml_cont(ctx.ggml, ggml_permute(ctx.ggml, weight_f32, 1, 0, 2, 3)),
         in_channels * kernel_size,
         out_channels);
+    // accumulate-in-place GEMM only where the tensor-core mm kernel applies
+    // (mirrors the Metal supports gate); otherwise keep the mul_mat + add chain
+    const bool use_acc = in_channels >= 64 && output_frames > 8;
     ggml_tensor * acc = nullptr;
     for (int64_t tap = 0; tap < kernel_size; ++tap) {
         // columns[c, j] = input[tap * dilation + j, c]: contiguous column view of input_cf.
@@ -244,8 +247,13 @@ ggml_tensor * conv1d_pertap_gemm_channel_fast(
             out_channels,
             weight_taps->nb[1],
             static_cast<size_t>(tap) * in_channels * sizeof(float));
-        auto * partial = ggml_mul_mat(ctx.ggml, tap_weights, columns);
-        acc = (acc == nullptr) ? partial : ggml_add(ctx.ggml, acc, partial);
+        if (acc == nullptr) {
+            acc = ggml_mul_mat(ctx.ggml, tap_weights, columns);
+        } else if (use_acc) {
+            acc = ggml_mul_mat_acc(ctx.ggml, tap_weights, columns, acc);
+        } else {
+            acc = ggml_add(ctx.ggml, acc, ggml_mul_mat(ctx.ggml, tap_weights, columns));
+        }
     }
     return acc;
 }
