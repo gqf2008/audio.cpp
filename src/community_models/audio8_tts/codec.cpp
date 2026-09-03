@@ -500,6 +500,22 @@ ggml_tensor * snake1d_channel_fast(
     ggml_tensor * x_cf,
     const core::TensorValue & alpha) {
     auto * alpha_cf = ggml_reshape_2d(ctx.ggml, alpha.tensor, alpha.tensor->ne[0], 1);
+    // Fused snake op: one elementwise pass instead of a 5-kernel chain (mul -> sin ->
+    // mul -> div -> add) over the largest decoder tensors. Per-element op order matches
+    // the chain; residual differences are metal sin ulp-level only (max int16 delta 12
+    // over a full utterance vs the chain). Set AUDIO8_TTS_CODEC_SNAKE_FUSED=0 to fall
+    // back to the explicit chain.
+    static const bool fused_disabled = [] {
+        const char * e = std::getenv("AUDIO8_TTS_CODEC_SNAKE_FUSED");
+        return e && e[0] == '0' && e[1] == '\0';
+    }();
+    if (!fused_disabled) {
+        ggml_tensor * alpha_f32 = alpha_cf;
+        if (alpha_f32->type != GGML_TYPE_F32) {
+            alpha_f32 = ggml_cast(ctx.ggml, alpha_f32, GGML_TYPE_F32);
+        }
+        return ggml_snake_1d(ctx.ggml, x_cf, alpha_f32);
+    }
     auto * ax = ggml_mul(ctx.ggml, x_cf, alpha_cf);
     auto * s = ggml_sin(ctx.ggml, ax);
     auto * s2 = ggml_mul(ctx.ggml, s, s);
