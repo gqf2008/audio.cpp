@@ -1,5 +1,6 @@
 #include "engine/community_models/audio8_tts/tokenizer_text.h"
 
+#include "engine/framework/text/chinese_normalization.h"
 #include "engine/framework/tokenizers/llama_bpe.h"
 
 #include <stdexcept>
@@ -46,7 +47,30 @@ Audio8TtsTextTokenizer::Audio8TtsTextTokenizer(std::shared_ptr<const Audio8TtsAs
     impl_ = std::make_shared<Impl>(std::move(assets));
 }
 
+namespace {
+
+// Any UTF-8 sequence in the CJK ranges (and the fullwidth forms that follow
+// them) is enough to pick the Chinese normalization rules.
+bool contains_cjk(const std::string & text) {
+    for (size_t i = 0; i < text.size(); ++i) {
+        const auto byte = static_cast<unsigned char>(text[i]);
+        if (byte >= 0xE2 && byte <= 0xE9) {
+            return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
 std::vector<int32_t> Audio8TtsTextTokenizer::encode(const std::string & text) const {
+    // The reference pipeline normalizes text before it reaches the model:
+    // without it, digits, phone numbers, currency and units are read
+    // inconsistently (the same sentence reads "138" differently run to run).
+    // Reuse the same rules as the index_tts2 and fireredtts3 tokenizers.
+    if (contains_cjk(text)) {
+        return impl_->tokenizer.encode(engine::text::normalize_chinese_text(text), true);
+    }
     return impl_->tokenizer.encode(text, true);
 }
 
