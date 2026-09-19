@@ -1279,6 +1279,7 @@ bool ggml_metal_device_supports_op(ggml_metal_device_t dev, const struct ggml_te
                         switch (op->type) {
                             case GGML_TYPE_F32:
                             case GGML_TYPE_F16:
+                            case GGML_TYPE_BF16:
                                 return true;
                             default:
                                 return false;
@@ -1286,6 +1287,7 @@ bool ggml_metal_device_supports_op(ggml_metal_device_t dev, const struct ggml_te
                     case GGML_TYPE_BF16:
                         switch (op->type) {
                             case GGML_TYPE_F32:
+                            case GGML_TYPE_F16:
                             case GGML_TYPE_BF16:
                                 return true;
                             default:
